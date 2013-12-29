@@ -1,0 +1,30 @@
+{
+    "versionLabel": "1.0",
+    "uuid": "4c15c196-e5ef-424c-bd8c-01bf1ed98c67",
+    "appKeys": {},
+    "longName": "sandglass",
+    "versionCode": 1,
+    "capabilities": [
+        ""
+    ],
+    "shortName": "sandglass",
+    "companyName": "zinziroge",
+    "watchapp": {
+        "watchface": false
+    },
+    "resources": {
+        "media": [
+            {
+                "type": "font",
+                "name": "FONT_ROBOTO_CONDENSED_21",
+                "file": "fonts/Roboto-Condensed.ttf"
+            },
+            {
+                "characterRegex": "[:0-9]",
+                "type": "font",
+                "name": "FONT_ROBOTO_BOLD_SUBSET_49",
+                "file": "fonts/Roboto-Bold.ttf"
+            }
+        ]
+    }
+}
