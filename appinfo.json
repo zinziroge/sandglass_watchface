@@ -10,20 +10,15 @@
     "shortName": "sandglass",
     "companyName": "zinziroge",
     "watchapp": {
-        "watchface": false
+        "watchface": true
     },
     "resources": {
         "media": [
             {
-                "type": "font",
-                "name": "FONT_ROBOTO_CONDENSED_21",
-                "file": "fonts/Roboto-Condensed.ttf"
-            },
-            {
-                "characterRegex": "[:0-9]",
-                "type": "font",
-                "name": "FONT_ROBOTO_BOLD_SUBSET_49",
-                "file": "fonts/Roboto-Bold.ttf"
+                "menuIcon": true,
+                "type": "png",
+                "name": "IMAGE_SANDGLASS_ICON",
+                "file": "images/sandglass_icon.png"
             }
         ]
     }
