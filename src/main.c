@@ -26,7 +26,7 @@
 	
 Window *window; // All apps must have at least one window
 TextLayer *time_layer; // The clock
-static BitmapLayer *sand_flow = NULL;
+//static BitmapLayer *sand_flow = NULL;
 static int amount_at_shake = 0;
 
 static GPath *sandglass_outline_ptr = NULL;
@@ -35,7 +35,10 @@ static GPath *sand_top_outline_ptr = NULL;
 static GPath *sand_bottom_outline_ptr = NULL;
 static GPath *one_line_ptr = NULL;
 static Layer *image_layer;
-static PropertyAnimation *property_animation;
+static Animation* animation;
+static struct AnimationImplementation animation_implimentation;
+
+int sandglass_angle = 0;
 
 static const GPathInfo SANDGLASS_OUTLINE = {
 	.num_points = 10,
@@ -69,6 +72,7 @@ static GPathInfo one_line = {
 	}
 };
 
+////////////////////////////////////////////////////////////////////////////////
 // Called once per second
 static void handle_second_tick(struct tm* tick_time, TimeUnits units_changed) {
 	static char time_text[] = "00:00:00"; // Needs to be static because it's used by the system later.
@@ -77,17 +81,24 @@ static void handle_second_tick(struct tm* tick_time, TimeUnits units_changed) {
 	//text_layer_set_text(time_layer, time_text);
 	text_layer_set_text(time_layer, "");
 	
-	if( tick_time->tm_min==0 && tick_time->tm_sec==0 )
+	/*
+	if( units_changed & MINUTE_UNIT ) {
+		if( animation_is_scheduled(animation) ) {
+			animation_unschedule(animation);
+		};
+		animation_schedule(animation); // <--system crash. why?
+	};
+	*/
+	
+	//if( tick_time->tm_min==0 && tick_time->tm_sec==0 )
+	if( units_changed & HOUR_UNIT )
 		amount_at_shake = 0;
-	//layer_mark_dirty(image_layer);
+
+	//layer_mark_dirty(image_layer);// <--system crash. why?
+	//sandglass_angle = (sandglass_angle+6) % 360;
 }
 
-// Called once per second
-static void handle_hour_tick(struct tm* tick_time, TimeUnits units_changed) {
-	amount_at_shake = 0;
-}
-
-static void accel_data_handler(AccelAxisType axis, int32_t direction) {
+static void accel_axis_handler(AccelAxisType axis, int32_t direction) {
 	time_t now = time(NULL);
 	struct tm* t = localtime(&now);
 	
@@ -97,6 +108,19 @@ static void accel_data_handler(AccelAxisType axis, int32_t direction) {
 	}
 }
 
+static void animation_setup(struct Animation *animation) {
+	(void)(animation);
+	sandglass_angle = 0;
+}
+
+static void animation_update(struct Animation *animation, const uint32_t time_normalized) {
+	(void)(animation);
+	sandglass_angle = (time_normalized - ANIMATION_NORMALIZED_MIN)/(ANIMATION_NORMALIZED_MAX - ANIMATION_NORMALIZED_MIN)
+		* 360;
+	text_layer_set_text(time_layer, "0");
+}
+
+////////////////////////////////////////////////////////////////////////////////
 static int get_triangle_ratio(const int amount) {
 	int a;
 	
@@ -118,9 +142,20 @@ static int get_round(const int v) {
 	}
 }
 
-static void my_gpath_draw_thickoutline(GContext* ctx, GPath* gpath_ptr, GPoint offset, int w) {
+////////////////////////////////////////////////////////////////////////////////
+static void my_gpath_draw_thickoutline(GContext* ctx, GPath* gpath_ptr, GPoint offset, int w, int angle) {
 	int w1 = (w+1)/2;
 	int w2 = (int)(w/2);
+	//int angle = 90;
+	int x, y;
+	
+	x = (offset.x-144/2)*cos_lookup(TRIG_MAX_ANGLE/360*sandglass_angle)/TRIG_MAX_RATIO 
+		+ (-(offset.y-168/2))*sin_lookup(TRIG_MAX_ANGLE/360*sandglass_angle)/TRIG_MAX_RATIO ;//- 144/2;// + offset.x;
+	y =  -(offset.x-144/2)*sin_lookup(TRIG_MAX_ANGLE/360*sandglass_angle)/TRIG_MAX_RATIO 
+		  + (-(offset.y-168/2))*cos_lookup(TRIG_MAX_ANGLE/360*sandglass_angle)/TRIG_MAX_RATIO;//- 168/2;// + offset.y;
+	offset.x = x + 144/2;
+	offset.y = 168/2 - y;
+	
 	
 	for(unsigned int i=0; i < gpath_ptr->num_points; i++) {
 		int grad_deg = atan2_lookup(
@@ -132,6 +167,8 @@ static void my_gpath_draw_thickoutline(GContext* ctx, GPath* gpath_ptr, GPoint o
 		one_line_ptr->points[1].x = gpath_ptr->points[i].x + get_round(sin_lookup(grad_deg)*w2)/TRIG_MAX_RATIO;
 		one_line_ptr->points[1].y = gpath_ptr->points[i].y + get_round(-cos_lookup(grad_deg)*w1)/TRIG_MAX_RATIO;
 
+		//grad_deg += angle;
+		
 		one_line_ptr->points[2].x = gpath_ptr->points[(i+1)%gpath_ptr->num_points].x 
 			+ get_round(sin_lookup(grad_deg)*w1)/TRIG_MAX_RATIO;
 		one_line_ptr->points[2].y = gpath_ptr->points[(i+1)%gpath_ptr->num_points].y 
@@ -141,7 +178,9 @@ static void my_gpath_draw_thickoutline(GContext* ctx, GPath* gpath_ptr, GPoint o
 		one_line_ptr->points[3].y = gpath_ptr->points[(i+1)%gpath_ptr->num_points].y 
 			+ get_round(cos_lookup(grad_deg)*w1)/TRIG_MAX_RATIO;
 		
+		gpath_rotate_to(one_line_ptr, TRIG_MAX_ANGLE/360*sandglass_angle);
 		gpath_move_to(one_line_ptr, offset);
+		
 		gpath_draw_filled(ctx, one_line_ptr);
 	}
 }
@@ -150,6 +189,14 @@ static void draw_sand(GContext* ctx, struct tm* t) {
 	int sand_flowed_amount = SG_AMOUNT*(t->tm_min*60 + t->tm_sec)/3600;
 	int sand_stay_amount = SG_AMOUNT - sand_flowed_amount;
 	int trapezoid_amount = (SG_W-SG_OUTLINE_GAP*2+SG_SLIT_W)*(SG_GH-SG_OUTLINE_GAP)/2;
+	int x, y;
+	
+	x = (SG_OFFSET_X-144/2)*cos_lookup(TRIG_MAX_ANGLE/360*sandglass_angle)/TRIG_MAX_RATIO 
+		+ (-(SG_OFFSET_Y-168/2))*sin_lookup(TRIG_MAX_ANGLE/360*sandglass_angle)/TRIG_MAX_RATIO ;
+	y =  -(SG_OFFSET_X-144/2)*sin_lookup(TRIG_MAX_ANGLE/360*sandglass_angle)/TRIG_MAX_RATIO 
+		  + (-(SG_OFFSET_Y-168/2))*cos_lookup(TRIG_MAX_ANGLE/360*sandglass_angle)/TRIG_MAX_RATIO;
+	x = x + 144/2;
+	y = 168/2 - y;
 	
 	// top
 	if( sand_stay_amount < trapezoid_amount ) {
@@ -175,7 +222,9 @@ static void draw_sand(GContext* ctx, struct tm* t) {
 		sand_top_outline.points[6] = sand_top_outline.points[5];
 		sand_top_outline.points[7] = sand_top_outline.points[5];
 	}
-	gpath_move_to(sand_top_outline_ptr, (GPoint){SG_OFFSET_X, SG_OFFSET_Y});
+	gpath_rotate_to(sand_top_outline_ptr, TRIG_MAX_ANGLE/360*sandglass_angle);
+	//gpath_move_to(sand_top_outline_ptr, (GPoint){SG_OFFSET_X, SG_OFFSET_Y});
+	gpath_move_to(sand_top_outline_ptr, (GPoint){x,y});
 	gpath_draw_filled(ctx, sand_top_outline_ptr);
 	
 	// bottom
@@ -216,38 +265,44 @@ static void draw_sand(GContext* ctx, struct tm* t) {
 		sand_bottom_outline.points[6] = sand_bottom_outline.points[5];
 		sand_bottom_outline.points[7] = sand_bottom_outline.points[5];
 	}
-	gpath_move_to(sand_bottom_outline_ptr, (GPoint){SG_OFFSET_X, SG_OFFSET_Y});
+	gpath_rotate_to(sand_bottom_outline_ptr, TRIG_MAX_ANGLE/360*sandglass_angle);
+	//gpath_move_to(sand_bottom_outline_ptr, (GPoint){SG_OFFSET_X, SG_OFFSET_Y});
+	gpath_move_to(sand_bottom_outline_ptr, (GPoint){x,y});
 	gpath_draw_filled(ctx, sand_bottom_outline_ptr);
 }
 
+static void draw_sandflow(GContext* ctx, struct tm *t) {
+	// draw sand flow
+	for(int i=SG_OFFSET_Y+SG_HH+SG_GH-SG_OUTLINE_GAP; i < SG_OFFSET_Y+SG_H-SG_OUTLINE_GAP; i++) {
+		if( i%4 < 2 ) {
+			graphics_draw_pixel(ctx, (GPoint){144/2, i+t->tm_sec%2});
+		} else {
+			graphics_draw_pixel(ctx, (GPoint){144/2+1, i+t->tm_sec%2});
+		}
+	}
+}
+
 // Called whien layer updates
-static void draw_sandglass_outline(Layer *my_layer, GContext* ctx) {
+static void draw_sandglass(Layer *layer, GContext* ctx) {
 	time_t now = time(NULL);
 	struct tm *t = localtime(&now);
 	
 	// Stroke the outline of sandglass:
 	graphics_context_set_stroke_color(ctx, GColorBlack);
 	graphics_context_set_fill_color(ctx, GColorBlack);
-	gpath_move_to(sandglass_outline_ptr, (GPoint){SG_OFFSET_X, SG_OFFSET_Y});
+	//gpath_move_to(sandglass_outline_ptr, (GPoint){SG_OFFSET_X, SG_OFFSET_Y});
 	//gpath_draw_outline(ctx, sandglass_outline_ptr);
 	//graphics_context_set_stroke_color(ctx, GColorBlack);
 	//graphics_context_set_fill_color(ctx, GColorBlack);
 	//gpath_draw_outline(ctx, sandglass_inline_ptr);
-	my_gpath_draw_thickoutline(ctx, sandglass_outline_ptr, (GPoint){SG_OFFSET_X,SG_OFFSET_Y}, 8);
-	//
+	my_gpath_draw_thickoutline(ctx, sandglass_outline_ptr, (GPoint){SG_OFFSET_X,SG_OFFSET_Y}, 8, 0);
 	
+	// draw sand and sandflow.
 	graphics_context_set_stroke_color(ctx, GColorBlack);
 	graphics_context_set_fill_color(ctx, GColorBlack);
 	draw_sand(ctx, t);
+	draw_sandflow(ctx, t);
 	
-	// draw sand flow
-	for(int i=SG_OFFSET_Y+SG_HH+SG_GH-SG_OUTLINE_GAP; i < SG_OFFSET_Y+SG_H-SG_OUTLINE_GAP; i++) {
-		if( i%4 < 2 ) {
-			graphics_draw_pixel(ctx, (GPoint){72, i+t->tm_sec%2});
-		} else {
-			graphics_draw_pixel(ctx, (GPoint){73, i+t->tm_sec%2});
-		}
-	}
 }
 
 static void setup_sandglass_outline(void) {
@@ -257,10 +312,7 @@ static void setup_sandglass_outline(void) {
 	sand_bottom_outline_ptr = gpath_create(&sand_bottom_outline);
 	one_line_ptr = gpath_create(&one_line);
 	
-	// Rotate 15 degrees:
-	gpath_rotate_to(sandglass_outline_ptr, TRIG_MAX_ANGLE / 360 * 0);
-	// Translate by (5, 5):
-	//gpath_move_to(sandglass_outline_ptr, GPoint(0, 0));	
+	//gpath_rotate_to(sandglass_outline_ptr, TRIG_MAX_ANGLE / 360 * 0);
 }
 
 // Handle the start-up of the app
@@ -280,20 +332,28 @@ static void do_init(void) {
 //	// (This is why it's a good idea to have a separate routine to do the update itself.)
 	time_t now = time(NULL);
 	struct tm *current_time = localtime(&now);
-	handle_second_tick(current_time, SECOND_UNIT);
+	handle_second_tick(current_time, SECOND_UNIT|HOUR_UNIT|MINUTE_UNIT);
 	//handle_hour_tick(current_time, HOUR_UNIT);
-	tick_timer_service_subscribe(SECOND_UNIT, &handle_second_tick);
+	tick_timer_service_subscribe(SECOND_UNIT|HOUR_UNIT, &handle_second_tick);
 	//tick_timer_service_subscribe(HOUR_UNIT, &handle_hour_tick);
 
- 	//
+	//
 	image_layer = layer_create(GRect(0, 0, 144, 168));
 	setup_sandglass_outline();
-	layer_set_update_proc(image_layer, &draw_sandglass_outline);
+	layer_set_update_proc(image_layer, &draw_sandglass);
 	
-	accel_tap_service_subscribe(&accel_data_handler);
+	accel_tap_service_subscribe(&accel_axis_handler);
+	
+	animation = animation_create();
+	animation_set_duration(animation, 2000);
+	//animation_implimentation.setup =  &animation_setup;
+	animation_implimentation.setup =  NULL;
+	animation_implimentation.teardown = NULL;
+	animation_implimentation.update = &animation_update;
+	animation_set_implementation(animation, &animation_implimentation);
 	
 	layer_add_child(window_get_root_layer(window), image_layer);
- 	layer_add_child(window_get_root_layer(window), text_layer_get_layer(time_layer));
+	layer_add_child(window_get_root_layer(window), text_layer_get_layer(time_layer));
 }
 
 
@@ -304,6 +364,7 @@ static void do_deinit(void) {
 	gpath_destroy(sand_top_outline_ptr);
 	gpath_destroy(sand_bottom_outline_ptr);
 	gpath_destroy(one_line_ptr);
+	animation_destroy(animation);
 	window_destroy(window);
 }
 
