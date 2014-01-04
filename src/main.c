@@ -35,10 +35,14 @@ static GPath *sand_top_outline_ptr = NULL;
 static GPath *sand_bottom_outline_ptr = NULL;
 static GPath *one_line_ptr = NULL;
 static Layer *image_layer;
-static Animation* animation;
-static struct AnimationImplementation animation_implimentation;
+//static Animation* animation;
+//static struct AnimationImplementation animation_implimentation;
+static AppTimer* timer;
 
 int sandglass_angle = 0;
+bool is_rotating = false;
+int delta_t = 33;
+int delta_deg = 6;
 
 static const GPathInfo SANDGLASS_OUTLINE = {
 	.num_points = 10,
@@ -74,6 +78,20 @@ static GPathInfo one_line = {
 
 ////////////////////////////////////////////////////////////////////////////////
 // Called once per second
+static void timer_callback(void *data) {        
+	sandglass_angle = (sandglass_angle + delta_deg)%360;
+	//Render
+	 layer_mark_dirty(image_layer);
+	 //Register next render
+	 timer = app_timer_register(delta_t, (AppTimerCallback) timer_callback, 0); 
+	
+	if( sandglass_angle == 180 ) {
+		app_timer_cancel(timer);
+		sandglass_angle = 0;
+		is_rotating = false;
+	}
+}
+
 static void handle_second_tick(struct tm* tick_time, TimeUnits units_changed) {
 	static char time_text[] = "00:00:00"; // Needs to be static because it's used by the system later.
 
@@ -90,9 +108,21 @@ static void handle_second_tick(struct tm* tick_time, TimeUnits units_changed) {
 	};
 	*/
 	
+	/*
+	if( units_changed & MINUTE_UNIT ) {
+		sandglass_angle = 0;
+		is_rotating = true;
+		timer = app_timer_register(delta_t, (AppTimerCallback) timer_callback, 0);
+	}
+	*/
+	
 	//if( tick_time->tm_min==0 && tick_time->tm_sec==0 )
-	if( units_changed & HOUR_UNIT )
+	if( units_changed & HOUR_UNIT ) {
 		amount_at_shake = 0;
+		sandglass_angle = 0;
+		is_rotating = true;
+		timer = app_timer_register(delta_t, (AppTimerCallback) timer_callback, 0);
+	}
 
 	//layer_mark_dirty(image_layer);// <--system crash. why?
 	//sandglass_angle = (sandglass_angle+6) % 360;
@@ -108,6 +138,7 @@ static void accel_axis_handler(AccelAxisType axis, int32_t direction) {
 	}
 }
 
+/*
 static void animation_setup(struct Animation *animation) {
 	(void)(animation);
 	sandglass_angle = 0;
@@ -119,6 +150,7 @@ static void animation_update(struct Animation *animation, const uint32_t time_no
 		* 360;
 	text_layer_set_text(time_layer, "0");
 }
+*/
 
 ////////////////////////////////////////////////////////////////////////////////
 static int get_triangle_ratio(const int amount) {
@@ -186,10 +218,20 @@ static void my_gpath_draw_thickoutline(GContext* ctx, GPath* gpath_ptr, GPoint o
 }
 
 static void draw_sand(GContext* ctx, struct tm* t) {
-	int sand_flowed_amount = SG_AMOUNT*(t->tm_min*60 + t->tm_sec)/3600;
-	int sand_stay_amount = SG_AMOUNT - sand_flowed_amount;
+	//int sand_flowed_amount = SG_AMOUNT*(t->tm_min*60 + t->tm_sec)/3600; // every an hour
+	//int sand_flowed_amount = SG_AMOUNT*(t->tm_sec)/60; // every a minutes
+	int sand_flowed_amount;
+	int sand_stay_amount;
 	int trapezoid_amount = (SG_W-SG_OUTLINE_GAP*2+SG_SLIT_W)*(SG_GH-SG_OUTLINE_GAP)/2;
 	int x, y;
+	
+	if( is_rotating ) {
+		sand_flowed_amount = SG_AMOUNT; // every a minutes
+	} else { 
+		//sand_flowed_amount = SG_AMOUNT*(t->tm_sec)/60; // every a minutes
+		sand_flowed_amount = SG_AMOUNT*(t->tm_min*60 + t->tm_sec)/3600; // every an hour
+	}
+	sand_stay_amount = SG_AMOUNT - sand_flowed_amount;
 	
 	x = (SG_OFFSET_X-144/2)*cos_lookup(TRIG_MAX_ANGLE/360*sandglass_angle)/TRIG_MAX_RATIO 
 		+ (-(SG_OFFSET_Y-168/2))*sin_lookup(TRIG_MAX_ANGLE/360*sandglass_angle)/TRIG_MAX_RATIO ;
@@ -301,7 +343,8 @@ static void draw_sandglass(Layer *layer, GContext* ctx) {
 	graphics_context_set_stroke_color(ctx, GColorBlack);
 	graphics_context_set_fill_color(ctx, GColorBlack);
 	draw_sand(ctx, t);
-	draw_sandflow(ctx, t);
+	if( sandglass_angle == 0 ) 
+		draw_sandflow(ctx, t);
 	
 }
 
@@ -332,7 +375,7 @@ static void do_init(void) {
 //	// (This is why it's a good idea to have a separate routine to do the update itself.)
 	time_t now = time(NULL);
 	struct tm *current_time = localtime(&now);
-	handle_second_tick(current_time, SECOND_UNIT|HOUR_UNIT|MINUTE_UNIT);
+	handle_second_tick(current_time, SECOND_UNIT);
 	//handle_hour_tick(current_time, HOUR_UNIT);
 	tick_timer_service_subscribe(SECOND_UNIT|HOUR_UNIT, &handle_second_tick);
 	//tick_timer_service_subscribe(HOUR_UNIT, &handle_hour_tick);
@@ -344,13 +387,13 @@ static void do_init(void) {
 	
 	accel_tap_service_subscribe(&accel_axis_handler);
 	
-	animation = animation_create();
-	animation_set_duration(animation, 2000);
+	//animation = animation_create();
+	//animation_set_duration(animation, 2000);
 	//animation_implimentation.setup =  &animation_setup;
-	animation_implimentation.setup =  NULL;
-	animation_implimentation.teardown = NULL;
-	animation_implimentation.update = &animation_update;
-	animation_set_implementation(animation, &animation_implimentation);
+	//animation_implimentation.setup =  NULL;
+	//animation_implimentation.teardown = NULL;
+	//animation_implimentation.update = &animation_update;
+	//animation_set_implementation(animation, &animation_implimentation);
 	
 	layer_add_child(window_get_root_layer(window), image_layer);
 	layer_add_child(window_get_root_layer(window), text_layer_get_layer(time_layer));
@@ -364,7 +407,8 @@ static void do_deinit(void) {
 	gpath_destroy(sand_top_outline_ptr);
 	gpath_destroy(sand_bottom_outline_ptr);
 	gpath_destroy(one_line_ptr);
-	animation_destroy(animation);
+	//animation_destroy(animation);
+	app_timer_cancel(timer);
 	window_destroy(window);
 }
 
